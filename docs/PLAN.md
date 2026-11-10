@@ -13,7 +13,7 @@ drag-and-zoom camera.
 **Exit:** live on GitHub Pages, and the README shows a screenshot and says how
 it is drawn.
 
-## Piece 2: picking
+## Piece 2: picking (built 9 Nov)
 
 Hover over a dot to see its place, magnitude, depth and time; click to open
 its USGS event page. With 2,000 dots, the simplest version projects each one to
@@ -22,6 +22,14 @@ the next step is an ID buffer rendered on the GPU.
 
 **Exit:** hovering the largest quake shows the same place and magnitude as its
 USGS event page.
+
+**Met 9 Nov.** Hovering the largest dot shows M7.0, 189 km ENE of Nagqu, China,
+18 km deep, 22 Oct 2026 14:33 UTC, the same as USGS event `us6000u43g`. The
+first version took the nearest centre and showed an M4.6 aftershock hidden
+under the M7.0 instead; the hit test now takes the dot drawn on top.
+
+**Left over:** a dot completely covered by a larger one cannot be picked. A
+tooltip that lists every earthquake under the pointer would fix that.
 
 ## Piece 3: time
 

@@ -1,19 +1,16 @@
 // Each earthquake is a square facing the screen, cut to a disc. Drawn
 // instanced: the same six corners, two triangles, once per earthquake.
 
+// The index of the earthquake under the pointer, or -1 for none.
+@group(0) @binding(1) var<uniform> hovered: i32;
+
 struct DotOut {
   @builtin(position) position: vec4f,
   @location(0) offsetPx: vec2f, // from the dot's centre, in device pixels
   @location(1) radiusPx: f32,
   @location(2) color: vec3f,
   @location(3) facing: f32,     // above 0 on the camera's side of the globe
-}
-
-// Radius in CSS pixels: 2.5 at M2.5, 1.5 times larger per whole magnitude.
-// A magnitude step releases about 32 times the energy, so this is a readable
-// ranking, not a physical scale.
-fn radiusCssPx(magnitude: f32) -> f32 {
-  return 2.5 * pow(1.5, magnitude - 2.5);
+  @location(4) highlight: f32,  // 1 for the hovered earthquake, 0 for the rest
 }
 
 // Depth on one orange ramp, light to dark: shallow earthquakes (to 70 km)
@@ -38,20 +35,24 @@ fn depthColor(km: f32) -> vec3f {
 }
 
 // The ring around each dot, the dark of the ocean, so that overlapping dots
-// stay apart.
+// stay apart. The hovered dot's ring is white instead.
 const ringColor = vec3f(0.03, 0.08, 0.16);
+const highlightColor = vec3f(1.0, 1.0, 1.0);
 
 @vertex
 fn vs(
   @builtin(vertex_index) v: u32,
+  @builtin(instance_index) instance: u32,
   @location(0) center: vec3f,
-  @location(1) magnitudeDepth: vec2f,
+  @location(1) radiusDepth: vec2f, // the radius in CSS pixels, the depth in km
 ) -> DotOut {
   var corners = array<vec2f, 6>(
     vec2f(-1.0, -1.0), vec2f(1.0, -1.0), vec2f(1.0, 1.0),
     vec2f(-1.0, -1.0), vec2f(1.0, 1.0), vec2f(-1.0, 1.0),
   );
-  let radiusPx = radiusCssPx(magnitudeDepth.x) * camera.pixelRatio;
+  let isHovered = i32(instance) == hovered;
+  // The hovered dot grows by 3 CSS pixels, room for its ring.
+  let radiusPx = (radiusDepth.x + select(0.0, 3.0, isHovered)) * camera.pixelRatio;
   // One pixel beyond the radius, room for the antialiased edge.
   let offsetPx = corners[v] * (radiusPx + 1.0);
 
@@ -65,11 +66,12 @@ fn vs(
   out.position = clip;
   out.offsetPx = offsetPx;
   out.radiusPx = radiusPx;
-  out.color = depthColor(magnitudeDepth.y);
+  out.color = depthColor(radiusDepth.y);
   // A point on the unit sphere is on the near side when the camera is above
   // its horizon: the direction to the camera and the point's normal, which is
   // the point itself, make an angle under 90 degrees.
   out.facing = dot(center, normalize(camera.eye - center));
+  out.highlight = select(0.0, 1.0, isHovered);
   return out;
 }
 
@@ -79,14 +81,16 @@ fn fs(in: DotOut) -> @location(0) vec4f {
   let r = length(in.offsetPx);
   // Coverage falls from 1 to 0 across the edge's last pixel.
   let coverage = clamp(in.radiusPx - r + 0.5, 0.0, 1.0);
-  // The ring is 1.5 CSS pixels wide, on dots large enough to spare it.
-  let ringPx = select(0.0, 1.5 * camera.pixelRatio, in.radiusPx >= 4.0 * camera.pixelRatio);
-  let fill = clamp(in.radiusPx - ringPx - r + 0.5, 0.0, 1.0);
+  // The ring is 1.5 CSS pixels wide, on dots large enough to spare it; the
+  // hovered dot's is 2 wide, whatever its size.
+  let ringCss = select(select(0.0, 1.5, in.radiusPx >= 4.0 * camera.pixelRatio), 2.0, in.highlight > 0.5);
+  let fill = clamp(in.radiusPx - ringCss * camera.pixelRatio - r + 0.5, 0.0, 1.0);
+  let ring = mix(ringColor, highlightColor, in.highlight);
   // Dots fade out over the last few degrees before the horizon instead of
   // vanishing at it.
   let alpha = coverage * smoothstep(0.0, 0.08, in.facing);
   if (alpha <= 0.0) {
     discard;
   }
-  return vec4f(mix(ringColor, in.color, fill) * alpha, alpha);
+  return vec4f(mix(ring, in.color, fill) * alpha, alpha);
 }

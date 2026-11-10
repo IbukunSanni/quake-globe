@@ -6,7 +6,9 @@ library: Vite, plain TypeScript and wgpu-matrix.
 
 ![The globe over the western Pacific: about 2,000 earthquakes along the Ring of Fire, sized by magnitude and shaded by depth](docs/images/globe-v0.1.jpg)
 
-Drag to turn the globe; scroll or pinch to zoom.
+Drag to turn the globe; scroll or pinch to zoom. Hover over an earthquake for
+its place, magnitude, depth and time, and click it for its USGS event page
+(on a touch screen, tap once for the details and again for the page).
 
 ## How it is drawn
 
@@ -26,6 +28,13 @@ Drag to turn the globe; scroll or pinch to zoom.
   ramp was checked for monotone lightness and single hue, and its darkest step
   clears 3.3:1 against the ocean. The deep dots trace the slabs subducting
   under Tonga, the Izu–Bonin arc and Japan.
+- **Picking matches what is drawn.** On every pointer move the CPU projects
+  each dot on the near side to the screen and takes the dot drawn on top
+  under the pointer, or failing that the nearest within a few pixels. With
+  2,000 dots this costs a fraction of a millisecond. The dot's radius is
+  computed once on the CPU and sent to the GPU, so the drawing and the hit
+  test cannot disagree. The hovered dot is drawn a second time, alone and
+  last (`draw(6, 1, 0, index)`), with a white ring.
 - **Geographic camera.** The camera hovers over a latitude and longitude at
   some altitude, and dragging moves it by the ground distance one pixel covers,
   so the ground under the pointer follows the pointer at any zoom.

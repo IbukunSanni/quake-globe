@@ -1,12 +1,14 @@
 import './style.css';
-import { mat4, vec3 } from 'wgpu-matrix';
+import { mat4, vec3, type Mat4, type Vec3 } from 'wgpu-matrix';
 import cameraShader from './camera.wgsl?raw';
 import coastShader from './coastlines.wgsl?raw';
 import globeShader from './globe.wgsl?raw';
 import quakeShader from './quakes.wgsl?raw';
 import { loadCoastlines } from './coastlines.ts';
 import { toUnitSphere } from './geo.ts';
-import { floatsPerQuake, loadQuakes } from './quakes.ts';
+import { pick } from './picking.ts';
+import { floatsPerQuake, loadQuakes, type Quakes } from './quakes.ts';
+import { hideTooltip, showTooltip } from './tooltip.ts';
 
 const canvas = document.querySelector<HTMLCanvasElement>('#globe')!;
 const status = document.querySelector<HTMLParagraphElement>('#status')!;
@@ -45,10 +47,10 @@ function cameraDistance(aspect: number): number {
   return 1 + (fitDistance(aspect) - 1) / view.zoom;
 }
 
-// The camera as the shaders read it: above (lat, lon), looking at the centre,
-// with north up the screen. right = forward × north, and up completes the
-// frame.
-function cameraUniforms(width: number, height: number): Float32Array {
+// The camera above (lat, lon), looking at the centre, with north up the
+// screen: right = forward × north, and up completes the frame. `packed` is
+// laid out as the shaders read it; the hit test uses `worldToClip` and `eye`.
+function cameraFrame(width: number, height: number): { packed: Float32Array; worldToClip: Mat4; eye: Vec3 } {
   const aspect = width / height;
   const distance = cameraDistance(aspect);
   const eye = vec3.scale(toUnitSphere(view.lon, view.lat), distance);
@@ -61,26 +63,50 @@ function cameraUniforms(width: number, height: number): Float32Array {
   const projection = mat4.perspective(fovY, aspect, Math.max(distance - 1.01, 0.01), distance + 1.01);
   const worldToClip = mat4.multiply(projection, mat4.lookAt(eye, [0, 0, 0], [0, 1, 0]));
 
-  const out = new Float32Array(36);
-  out.set([...eye, Math.tan(fovY / 2), ...right, aspect, ...up, window.devicePixelRatio, ...forward, 0], 0);
-  out.set(worldToClip, 16);
-  out.set([width, height], 32);
-  return out;
+  const packed = new Float32Array(36);
+  packed.set([...eye, Math.tan(fovY / 2), ...right, aspect, ...up, window.devicePixelRatio, ...forward, 0], 0);
+  packed.set(worldToClip, 16);
+  packed.set([width, height], 32);
+  return { packed, worldToClip, eye };
+}
+
+type Point = { x: number; y: number }; // CSS pixels from the canvas's top-left
+type Pointer = Point | null;            // or gone
+
+// What the visitor does with the pointer, besides turning and zooming.
+interface PointerHandlers {
+  // A pointer moving with no button held: where it is, or null once it starts
+  // a drag, zooms or leaves the canvas.
+  hover: (pointer: Pointer) => void;
+  // A press and release that moved less than 5 pixels: a click, not a drag.
+  tap: (point: Point, pointerType: string) => void;
 }
 
 // Drag to turn the globe; wheel, or pinch on a trackpad, to zoom. Pointer
 // events cover a mouse, a pen and one finger alike.
-function listenForInput(requestRender: () => void): void {
+function listenForInput(requestRender: () => void, { hover, tap }: PointerHandlers): void {
   let dragging: number | null = null; // the pointer turning the globe
   let lastX = 0;
   let lastY = 0;
+  let downX = 0; // where the press began
+  let downY = 0;
+  const local = (e: PointerEvent): Point => {
+    const rect = canvas.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  };
   canvas.addEventListener('pointerdown', (e) => {
     dragging = e.pointerId;
-    lastX = e.clientX;
-    lastY = e.clientY;
+    lastX = downX = e.clientX;
+    lastY = downY = e.clientY;
     canvas.setPointerCapture(e.pointerId); // keep the moves even off the canvas
+    hover(null);
   });
+  canvas.addEventListener('pointerleave', () => hover(null));
   canvas.addEventListener('pointermove', (e) => {
+    if (dragging === null) {
+      hover(local(e));
+      return;
+    }
     if (e.pointerId !== dragging) return;
     // The ground below the camera that one pixel covers, in degrees of arc:
     // the pixel's angle seen from the camera times the camera's height. With
@@ -98,11 +124,14 @@ function listenForInput(requestRender: () => void): void {
     lastY = e.clientY;
     requestRender();
   });
-  const release = (e: PointerEvent): void => {
+  canvas.addEventListener('pointerup', (e) => {
+    if (e.pointerId !== dragging) return;
+    dragging = null;
+    if (Math.hypot(e.clientX - downX, e.clientY - downY) < 5) tap(local(e), e.pointerType);
+  });
+  canvas.addEventListener('pointercancel', (e) => {
     if (e.pointerId === dragging) dragging = null;
-  };
-  canvas.addEventListener('pointerup', release);
-  canvas.addEventListener('pointercancel', release);
+  });
   // A trackpad pinch arrives as a wheel event with ctrlKey set, and the
   // browser would zoom the page unless the event is cancelled, which a
   // passive listener cannot do. At the closest zoom, 40, the camera is about
@@ -110,6 +139,7 @@ function listenForInput(requestRender: () => void): void {
   canvas.addEventListener('wheel', (e) => {
     e.preventDefault();
     view.zoom = Math.max(0.7, Math.min(40, view.zoom * Math.exp(-e.deltaY * 0.001)));
+    hover(null); // the dots move under the pointer; the next move picks again
     requestRender();
   }, { passive: false });
 }
@@ -205,7 +235,22 @@ async function main(): Promise<void> {
   });
   const globeBindGroup = bindCamera(globePipeline);
   const coastBindGroup = bindCamera(coastPipeline);
-  const quakeBindGroup = bindCamera(quakePipeline);
+
+  // The hovered earthquake's index, or -1: one i32, in a buffer of the
+  // 16 bytes a uniform binding is safe with. Only the dots read it.
+  let hoveredIndex = -1;
+  const hoveredBuffer = device.createBuffer({
+    size: 16,
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+  });
+  device.queue.writeBuffer(hoveredBuffer, 0, new Int32Array([hoveredIndex]));
+  const quakeBindGroup = device.createBindGroup({
+    layout: quakePipeline.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: uniforms } },
+      { binding: 1, resource: { buffer: hoveredBuffer } },
+    ],
+  });
 
   // Copies data the GPU will read as vertices, once.
   const vertexBuffer = (data: Float32Array): GPUBuffer => {
@@ -225,7 +270,7 @@ async function main(): Promise<void> {
   // needs a depth buffer: the globe is one convex surface, and the lines and
   // dots hide their own far side.
   const render = (): void => {
-    device.queue.writeBuffer(uniforms, 0, cameraUniforms(canvas.width, canvas.height));
+    device.queue.writeBuffer(uniforms, 0, cameraFrame(canvas.width, canvas.height).packed);
     const encoder = device.createCommandEncoder();
     const pass = encoder.beginRenderPass({
       colorAttachments: [{
@@ -249,6 +294,9 @@ async function main(): Promise<void> {
       pass.setBindGroup(0, quakeBindGroup);
       pass.setVertexBuffer(0, quakes.buffer);
       pass.draw(6, quakes.count); // two triangles per earthquake
+      // The hovered one again, alone and last, so its neighbours cannot
+      // cover it: one instance, starting at its index.
+      if (hoveredIndex >= 0) pass.draw(6, 1, 0, hoveredIndex);
     }
     pass.end();
     device.queue.submit([encoder.finish()]);
@@ -276,7 +324,65 @@ async function main(): Promise<void> {
     render();
   }).observe(canvas);
 
-  listenForInput(requestRender);
+  // The earthquakes on the CPU too, for the hit test and the details.
+  let data: Quakes | null = null;
+
+  // The earthquake at a point on the canvas, or -1.
+  const pickAt = (point: Point): number => {
+    if (!data) return -1;
+    const frame = cameraFrame(canvas.width, canvas.height);
+    return pick(data.instances, data.count, frame.worldToClip, frame.eye,
+      point.x, point.y, canvas.clientWidth, canvas.clientHeight);
+  };
+
+  // Rings the earthquake (or none, with -1) and shows its details beside the
+  // point, or hides them.
+  const select = (index: number, point: Point | null, hint: string): void => {
+    if (data && point && index >= 0) {
+      const rect = canvas.getBoundingClientRect();
+      showTooltip(data.records[index], rect.left + point.x, rect.top + point.y, hint);
+    } else {
+      hideTooltip();
+    }
+    if (index !== hoveredIndex) {
+      hoveredIndex = index;
+      device.queue.writeBuffer(hoveredBuffer, 0, new Int32Array([index]));
+      requestRender();
+    }
+  };
+
+  // Opens only USGS's own pages, since the address comes from an outside feed.
+  const openEventPage = (index: number): void => {
+    const url = data?.records[index]?.url;
+    if (url?.startsWith('https://earthquake.usgs.gov/')) window.open(url, '_blank', 'noopener');
+  };
+
+  const hover = (pointer: Pointer): void => {
+    const index = pointer ? pickAt(pointer) : -1;
+    select(index, pointer, 'Click for the USGS event page');
+    canvas.style.cursor = index >= 0 ? 'pointer' : ''; // '' is the stylesheet's grab
+  };
+
+  // A finger cannot hover, so its first tap on an earthquake shows the
+  // details and a second tap on the same one opens the page. A mouse or pen
+  // has already shown them by hovering, so its click opens the page at once.
+  let tapped = -1;
+  const tap = (point: Point, pointerType: string): void => {
+    const index = pickAt(point);
+    if (pointerType !== 'touch') {
+      if (index >= 0) openEventPage(index);
+      hover(point);
+      return;
+    }
+    if (index >= 0 && index === tapped) {
+      openEventPage(index);
+      return;
+    }
+    tapped = index;
+    select(index, point, 'Tap again for the USGS event page');
+  };
+
+  listenForInput(requestRender, { hover, tap });
 
   // The globe is already up and turning; the coastlines and the dots join it
   // as they arrive. A failed download leaves the rest and says why.
@@ -289,9 +395,11 @@ async function main(): Promise<void> {
   try {
     const loaded = await quakesLoading;
     quakes = { buffer: vertexBuffer(loaded.instances), count: loaded.count };
+    data = loaded;
     status.textContent = '';
+    const largest = loaded.records[loaded.count - 1];
     summary.textContent = `${loaded.count.toLocaleString()} earthquakes of magnitude 2.5 or more · `
-      + `largest M${loaded.largest.mag.toFixed(1)}, ${loaded.largest.place}`;
+      + `largest M${largest.mag.toFixed(1)}, ${largest.place}`;
     requestRender();
   } catch (err: unknown) {
     status.textContent = `Could not load earthquakes: ${err instanceof Error ? err.message : String(err)}`;

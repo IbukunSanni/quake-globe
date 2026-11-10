@@ -103,6 +103,38 @@ html, body {
   background: #c9d1e0;
 }
 
+#tooltip {
+  position: fixed;
+  max-width: min(320px, calc(100vw - 16px));
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(10, 14, 24, 0.92);
+  border: 1px solid rgba(201, 209, 224, 0.2);
+  font-size: 12px;
+  line-height: 1.45;
+  pointer-events: none;
+}
+
+#tooltip[hidden] {
+  display: none;
+}
+
+.tooltip-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e6ebf3;
+}
+
+.tooltip-detail {
+  opacity: 0.85;
+  font-variant-numeric: tabular-nums;
+}
+
+.tooltip-hint {
+  margin-top: 4px;
+  opacity: 0.6;
+}
+
 #credit {
   position: fixed;
   right: 16px;
