@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Every earthquake of magnitude 2.5 or more in the past 30 days, live from USGS, on a globe drawn with raw WebGPU." />
+    <title>Quake Globe</title>
+  </head>
+  <body>
+    <canvas id="globe"></canvas>
+    <header id="title">
+      <h1>Earthquakes, past 30 days</h1>
+      <p id="summary"></p>
+    </header>
+    <aside id="legend" aria-label="Legend">
+      <p class="legend-heading">Depth</p>
+      <div class="depth-bar"></div>
+      <div class="depth-ticks">
+        <span style="left: 0%">0</span>
+        <span style="left: 33.33%">70</span>
+        <span style="left: 66.67%">300</span>
+        <span style="left: 100%">700 km</span>
+      </div>
+      <p class="legend-heading">Magnitude</p>
+      <div class="magnitudes">
+        <span><i style="--d: 6.1px"></i>3</span>
+        <span><i style="--d: 13.8px"></i>5</span>
+        <span><i style="--d: 31px"></i>7</span>
+      </div>
+    </aside>
+    <p id="status"></p>
+    <p id="credit">
+      Data: <a href="https://earthquake.usgs.gov/earthquakes/feed/">USGS Earthquake Hazards Program</a> ·
+      Coastlines: <a href="https://www.naturalearthdata.com/">Natural Earth</a>
+    </p>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

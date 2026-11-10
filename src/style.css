@@ -1,0 +1,143 @@
+html, body {
+  margin: 0;
+  height: 100%;
+  background: #05060a;
+  color: #c9d1e0;
+  font-family: system-ui, sans-serif;
+}
+
+#globe {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+  cursor: grab;
+  touch-action: none; /* a finger drag turns the globe instead of scrolling the page */
+}
+
+#globe:active {
+  cursor: grabbing;
+}
+
+#title {
+  position: fixed;
+  left: 16px;
+  top: 12px;
+  max-width: calc(100vw - 32px);
+  pointer-events: none;
+}
+
+#title h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  color: #e6ebf3;
+}
+
+#summary {
+  margin: 4px 0 0;
+  font-size: 13px;
+  opacity: 0.8;
+}
+
+#legend {
+  position: fixed;
+  right: 16px;
+  top: 12px;
+  width: 180px;
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.legend-heading {
+  margin: 0 0 6px;
+  opacity: 0.8;
+}
+
+/* The same four stops as the shader's depth ramp, a third of the bar per class. */
+.depth-bar {
+  height: 8px;
+  border-radius: 4px;
+  background: linear-gradient(to right, #ffdda7 0%, #ffab55 33.33%, #f17d24 66.67%, #ce5600 100%);
+}
+
+.depth-ticks {
+  position: relative;
+  height: 16px;
+  margin: 4px 0 14px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+
+.depth-ticks span {
+  position: absolute;
+  transform: translateX(-50%);
+}
+
+.depth-ticks span:first-child {
+  transform: none;
+}
+
+.depth-ticks span:last-child {
+  transform: translateX(-100%);
+  white-space: nowrap;
+}
+
+/* Diameters from the shader's radius, 2.5 px × 1.5^(magnitude − 2.5). */
+.magnitudes {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.magnitudes span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.magnitudes i {
+  display: inline-block;
+  width: var(--d);
+  height: var(--d);
+  border-radius: 50%;
+  background: #c9d1e0;
+}
+
+#credit {
+  position: fixed;
+  right: 16px;
+  bottom: 8px;
+  margin: 0;
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+#credit a {
+  color: inherit;
+}
+
+@media (max-width: 600px) {
+  #legend {
+    top: auto;
+    bottom: 32px;
+    right: 16px;
+  }
+}
+
+#status {
+  position: fixed;
+  left: 16px;
+  bottom: 8px;
+  margin: 0;
+  font-size: 13px;
+}
+
+#status.error {
+  top: 50%;
+  left: 50%;
+  bottom: auto;
+  transform: translate(-50%, -50%);
+  max-width: calc(100vw - 32px);
+  font-size: 16px;
+  text-align: center;
+}
